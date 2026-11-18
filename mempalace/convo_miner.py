@@ -17,6 +17,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
+from ._env import env_flag
 from .backends import PalaceNotFoundError
 from .entities import entities_metadata
 from .fsio import encoding_metadata, open_source_file
@@ -877,9 +878,11 @@ def _compute_hallways_for_wing_safe(wing, collection, drawers_filed, config=None
     """Auto-populate the associative graph from the entities just mined.
 
     Best-effort: hallway computation must never fail an otherwise-good mine, and is
-    skipped when nothing new was filed.
+    skipped when nothing new was filed. ``MEMPALACE_CONVO_SKIP_HALLWAYS`` skips it too:
+    each run recounts the whole wing, so a file-by-file backfill of a large wing sets it
+    and rebuilds once at the end (``mempalace hallways --rebuild``).
     """
-    if drawers_filed <= 0:
+    if drawers_filed <= 0 or env_flag("MEMPALACE_CONVO_SKIP_HALLWAYS"):
         return
     try:
         from .hallways import compute_hallways_for_wing

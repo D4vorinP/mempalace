@@ -320,6 +320,50 @@ class TestDiaryTools:
         assert bad["success"] is False
         assert "invalid path characters" in bad["error"]
 
+    def test_diary_write_keeps_a_routed_wing_as_written(
+        self, monkeypatch, tmp_dir, palace_path, kg
+    ):
+        """A wing named by ``wing_routes`` is where the miner files the session's
+        transcript, so a hook checkpoint must land in that same wing rather than in
+        a slugged twin (claude-config, not claude_config). ``{name}`` routes match
+        any folder. Every other wing is still canonicalized (#2579)."""
+        import json
+        import os
+
+        from mempalace.config import MempalaceConfig
+
+        cfg_dir = os.path.join(tmp_dir, "routed_config")
+        os.makedirs(cfg_dir)
+        with open(os.path.join(cfg_dir, "config.json"), "w") as f:
+            json.dump(
+                {
+                    "palace_path": palace_path,
+                    "wing_routes": [
+                        {"path": "D:/Projects/ClaudeCode", "wing": "claude-config"},
+                        {"path": "D:/Work/*", "wing": "work-{name}"},
+                    ],
+                },
+                f,
+            )
+        _patch_mcp_server(monkeypatch, MempalaceConfig(config_dir=cfg_dir), kg)
+        _client, col = _get_collection(palace_path, create=True)
+        del _client
+        from mempalace.mcp_server import tool_diary_write
+
+        def stored_wing(wing):
+            written = tool_diary_write(
+                agent_name="claude-code",
+                entry=f"checkpoint in {wing}",
+                topic="checkpoint",
+                wing=wing,
+            )
+            assert written["success"] is True
+            return col.get(ids=[written["entry_id"]], include=["metadatas"])["metadatas"][0]["wing"]
+
+        assert stored_wing("claude-config") == "claude-config"
+        assert stored_wing("work-acme_app") == "work-acme_app"
+        assert stored_wing("My-App") == "my_app"
+
     def test_diary_read_case_insensitive_agent(self, monkeypatch, config, palace_path, kg):
         """Regression for #1243: diary_read must be case-insensitive over
         agent_name. Writing as "Claude" and reading as "claude" (or vice

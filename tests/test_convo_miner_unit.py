@@ -1197,3 +1197,33 @@ def test_mine_convos_passes_the_directory_it_read_from(tmp_path, monkeypatch):
     convo_miner.mine_convos(str(transcripts), str(tmp_path / "palace"))
 
     assert seen.get("source_dir_ino") == si.directory_identity(transcripts)
+
+
+def _record_hallway_recounts(monkeypatch):
+    from mempalace import hallways
+
+    recounted = []
+    monkeypatch.setattr(
+        hallways,
+        "compute_hallways_for_wing",
+        lambda wing, col=None, config=None: recounted.append(wing),
+    )
+    return recounted
+
+
+def test_a_mine_that_filed_drawers_recounts_its_wing_hallways(monkeypatch):
+    from mempalace import convo_miner
+
+    recounted = _record_hallway_recounts(monkeypatch)
+    monkeypatch.delenv("MEMPALACE_CONVO_SKIP_HALLWAYS", raising=False)
+    convo_miner._compute_hallways_for_wing_safe("acme", object(), drawers_filed=3)
+    assert recounted == ["acme"]
+
+
+def test_skip_switch_leaves_hallways_for_a_later_rebuild(monkeypatch):
+    from mempalace import convo_miner
+
+    recounted = _record_hallway_recounts(monkeypatch)
+    monkeypatch.setenv("MEMPALACE_CONVO_SKIP_HALLWAYS", "1")
+    convo_miner._compute_hallways_for_wing_safe("acme", object(), drawers_filed=3)
+    assert recounted == []

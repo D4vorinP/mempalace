@@ -26,7 +26,12 @@ def tool_diary_write(agent_name: str, entry: str, topic: str = "general", wing: 
         entry = sanitize_content(entry)
         topic = sanitize_name(topic, "topic")
         if wing:
-            wing = canonical_wing(wing, "wing")
+            # A wing_routes target is kept as written: the miner files the session's
+            # transcript under that exact name, so the checkpoint has to land beside it.
+            if is_route_wing(wing, _config.wing_routes):
+                wing = sanitize_name(wing, "wing")
+            else:
+                wing = canonical_wing(wing, "wing")
         else:
             wing = f"wing_{normalize_wing_name(agent_name) or agent_name}"
     except ValueError as e:

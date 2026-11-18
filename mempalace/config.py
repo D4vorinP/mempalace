@@ -7,6 +7,7 @@ The default config directory is resolved by ``paths.config_dir`` (XDG with
 back-compat for existing ``~/.mempalace`` installs).
 """
 
+import fnmatch
 import hashlib
 import json
 import logging
@@ -76,6 +77,11 @@ def canonical_wing(value: str, field_name: str = "wing") -> str:
     """
     validated = sanitize_name(value, field_name)
     return sanitize_name(normalize_wing_name(validated), field_name)
+
+
+def is_route_wing(wing: str, routes) -> bool:
+    """True when a ``wing_routes`` target names ``wing``; a ``{name}`` target matches any folder."""
+    return any(fnmatch.fnmatchcase(wing, target.replace("{name}", "*")) for _, target in routes)
 
 
 # Where a session started in the home directory files (see hooks_cli).
@@ -963,6 +969,20 @@ class MempalaceConfig:
             return flag
         hooks = self._file_config.get("hooks", {})
         return hooks.get("auto_save", True)
+
+    @property
+    def wing_routes(self):
+        """``(path glob, wing)`` pairs from ``wing_routes``; malformed entries are skipped."""
+        routes = self._file_config.get("wing_routes", [])
+        if not isinstance(routes, list):
+            return []
+        return [
+            (route["path"], route["wing"])
+            for route in routes
+            if isinstance(route, dict)
+            and isinstance(route.get("path"), str)
+            and isinstance(route.get("wing"), str)
+        ]
 
     @property
     def convo_spellcheck(self):

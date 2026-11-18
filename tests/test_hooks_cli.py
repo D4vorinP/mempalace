@@ -2,9 +2,11 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -3119,6 +3121,106 @@ def test_project_wing_falls_back_to_the_encoded_folder_then_sessions(tmp_path):
     path.write_text(json.dumps({"type": "queue-operation"}) + "\n", encoding="utf-8")
     assert _project_wing(str(path)) == "thing"
     assert _project_wing("/some/random/path.jsonl") == "sessions"
+
+
+_needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="needs the git CLI")
+
+
+def _git(*args, cwd):
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+    )
+
+
+def _clone_with_sibling_worktree(tmp_path):
+    clone = tmp_path / "acme-app"
+    clone.mkdir()
+    _git("init", cwd=clone)
+    _git("commit", "--allow-empty", "-m", "init", cwd=clone)
+    worktree = tmp_path / "acme-app-feature-x"
+    _git("worktree", "add", "-b", "feature-x", str(worktree), cwd=clone)
+    return clone, worktree
+
+
+def _with_routes(monkeypatch, *routes):
+    from mempalace import hooks_cli
+
+    config = SimpleNamespace(wing_routes=list(routes))
+    monkeypatch.setattr(hooks_cli, "MempalaceConfig", lambda: config)
+
+
+@_needs_git
+def test_project_wing_files_a_sibling_worktree_under_its_root_clone(tmp_path):
+    from mempalace.hooks_cli import _project_wing
+
+    _clone, worktree = _clone_with_sibling_worktree(tmp_path)
+    path = _write_transcript_with_cwd(tmp_path, str(worktree))
+    assert _project_wing(path) == "acme_app"
+
+
+@_needs_git
+def test_project_wing_files_a_subdirectory_under_its_repository(tmp_path):
+    from mempalace.hooks_cli import _project_wing
+
+    clone, _worktree = _clone_with_sibling_worktree(tmp_path)
+    subdirectory = clone / "src" / "core"
+    subdirectory.mkdir(parents=True)
+    path = _write_transcript_with_cwd(tmp_path, str(subdirectory))
+    assert _project_wing(path) == "acme_app"
+
+
+def test_project_wing_keeps_the_folder_name_of_a_removed_worktree(tmp_path):
+    from mempalace.hooks_cli import _project_wing
+
+    path = _write_transcript_with_cwd(tmp_path, str(tmp_path / "gone" / "acme-app-feature-x"))
+    assert _project_wing(path) == "acme_app_feature_x"
+
+
+def test_project_wing_takes_the_first_matching_wing_route(tmp_path, monkeypatch):
+    from mempalace.hooks_cli import _project_wing
+
+    _with_routes(monkeypatch, (f"{tmp_path}/acme-app*", "Acme"), (f"{tmp_path}/*", "other"))
+    acme = _write_transcript_with_cwd(tmp_path, str(tmp_path / "acme-app-old"))
+    zeta = _write_transcript_with_cwd(tmp_path, str(tmp_path / "zeta"), name="z.jsonl")
+    assert _project_wing(acme) == "Acme"
+    assert _project_wing(zeta) == "other"
+
+
+def test_wing_route_name_placeholder_is_the_matched_folder(tmp_path, monkeypatch):
+    from mempalace.hooks_cli import _project_wing
+
+    _with_routes(monkeypatch, (f"{tmp_path}/clients/*", "client_{name}"))
+    path = _write_transcript_with_cwd(tmp_path, str(tmp_path / "clients" / "Big-Co"))
+    assert _project_wing(path) == "client_big_co"
+
+
+@_needs_git
+def test_wing_route_matches_the_root_clone_of_a_worktree(tmp_path, monkeypatch):
+    from mempalace.hooks_cli import _project_wing
+
+    clone, worktree = _clone_with_sibling_worktree(tmp_path)
+    _with_routes(monkeypatch, (str(clone), "Acme"))
+    path = _write_transcript_with_cwd(tmp_path, str(worktree))
+    assert _project_wing(path) == "Acme"
+
+
+def test_wing_route_takes_precedence_over_the_workstation_wing(tmp_path, monkeypatch):
+    from mempalace.hooks_cli import _project_wing
+
+    _with_routes(monkeypatch, ("~", "home_notes"))
+    path = _write_transcript_with_cwd(tmp_path, str(Path.home()))
+    assert _project_wing(path) == "home_notes"
+
+
+def test_project_wing_survives_an_unreadable_config(tmp_path, monkeypatch):
+    from mempalace import hooks_cli
+
+    monkeypatch.setattr(hooks_cli, "MempalaceConfig", lambda: None)
+    path = _write_transcript_with_cwd(tmp_path, "/Users/me/dev/mempalace")
+    assert hooks_cli._project_wing(path) == "mempalace"
 
 
 def test_ingest_transcript_passes_the_project_wing_to_mine(tmp_path, monkeypatch):
