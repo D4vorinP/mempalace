@@ -12,6 +12,7 @@ an append-only JSONL transcript per session, in the Claude Code record shape
 with ``cwd`` on every record, and passes that file's path here.
 """
 
+import fnmatch
 import hashlib
 import json
 import os
@@ -31,6 +32,7 @@ from mempalace._env import env_float, env_str, parse_bool
 from mempalace._proc import pid_alive as _pid_alive
 from mempalace.config import MempalaceConfig, normalize_wing_name
 from mempalace.fsio import decode_source
+from mempalace.gitdir import repo_common_dir
 from mempalace.normalize import codex_response_message
 from mempalace.timeutil import utc_now_iso
 from mempalace.write_routing import (
@@ -1485,12 +1487,41 @@ def _cwd_from_jsonl(transcript_path: str) -> Optional[str]:
     return None
 
 
+def _project_root(cwd_norm: str) -> str:
+    try:
+        start = Path(cwd_norm)
+        for folder in (start, *start.parents):
+            if not (folder / ".git").exists():
+                continue
+            common = repo_common_dir(folder)
+            # A submodule's Git directory lives under the parent's .git/modules, so only
+            # a folder named .git leads back to a main clone.
+            if common is not None and common.resolve().name == ".git":
+                return common.resolve().parent.as_posix()
+            return folder.as_posix()
+    except OSError:
+        pass
+    return cwd_norm
+
+
+def _routed_wing(root: str) -> Optional[str]:
+    try:
+        routes = MempalaceConfig().wing_routes
+    except Exception:
+        # A config that cannot be read keeps the default wing instead of failing the hook.
+        return None
+    for pattern, wing in routes:
+        if fnmatch.fnmatch(root, os.path.expanduser(pattern).replace("\\", "/").rstrip("/")):
+            return wing.replace("{name}", _wing_slug(root.rsplit("/", 1)[-1]))
+    return None
+
+
 def _wing_from_jsonl_cwd(transcript_path: str) -> Optional[str]:
-    """The project wing from the transcript's cwd leaf, or ``None``."""
+    """The project wing from the leaf of the cwd's repository root, or ``None``."""
     cwd_norm = _cwd_from_jsonl(transcript_path)
     if not cwd_norm:
         return None
-    project = cwd_norm.rsplit("/", 1)[-1]
+    project = _project_root(cwd_norm).rsplit("/", 1)[-1]
     if project:
         return _wing_slug(project)
     return None
@@ -1513,10 +1544,14 @@ def _project_wing(transcript_path: str) -> str:
     next to everything else about that project instead of a flat
     ``sessions`` wing that ``mempalace audit`` then flags. A session started
     in the home directory belongs to no project and goes to the machine's
-    workstation wing.
+    workstation wing. A matching ``wing_routes`` entry in the config wins
+    over both.
     """
     cwd_norm = _cwd_from_jsonl(transcript_path)
     if cwd_norm:
+        routed = _routed_wing(_project_root(cwd_norm))
+        if routed:
+            return routed
         home = str(Path.home()).replace("\\", "/").rstrip("/")
         if cwd_norm.lower() == home.lower():
             return _workstation_wing()
@@ -1530,8 +1565,9 @@ def _wing_from_transcript_path(transcript_path: str) -> str:
 
     1. PRIMARY — Read ``cwd`` from the JSONL transcript. Claude Code records
        the absolute working directory on most message types, so the project
-       name is whatever the leaf path segment of cwd is. This is the
-       canonical answer when present.
+       name is the leaf of the repository root holding cwd (a linked
+       worktree resolves to its main clone), or of cwd outside a repository.
+       This is the canonical answer when present.
 
     2. FALLBACK — Decode the encoded folder under ``.claude/projects/``.
        Claude Code flattens path separators to dashes (``/Users/me/code/foo``

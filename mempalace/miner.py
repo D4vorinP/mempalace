@@ -29,6 +29,7 @@ from .entity_detector import (
     _use_english_filters,
 )
 from .fsio import atomic_write_json, encoding_metadata, move_aside, read_source_text
+from .gitdir import repo_common_dir as _repo_common_dir
 
 # Module-level import so tests can patch it as
 # ``mempalace.miner.compute_hallways_for_wing``. The integration call
@@ -421,25 +422,6 @@ def load_gitignore_matcher(dir_path: Path, cache: dict):
     if dir_path not in cache:
         cache[dir_path] = GitignoreMatcher.from_dir(dir_path)
     return cache[dir_path]
-
-
-def _repo_common_dir(project_path: Path) -> Optional[Path]:
-    """Resolve the Git directory holding a checkout's shared exclude file."""
-    git_dir = project_path / ".git"
-    if git_dir.is_file():
-        marker = git_dir.read_text(encoding="utf-8", errors="surrogateescape").strip()
-        if not marker.startswith("gitdir:") or not marker[7:].strip():
-            return None
-        git_dir = project_path / marker[7:].strip()
-    elif not git_dir.is_dir():
-        return None
-    try:
-        common = (
-            (git_dir / "commondir").read_text(encoding="utf-8", errors="surrogateescape").strip()
-        )
-    except FileNotFoundError:
-        return git_dir
-    return git_dir / common if common else None
 
 
 def load_repo_exclude_matcher(project_path: Path, cache: dict):

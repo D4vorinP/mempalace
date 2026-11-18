@@ -965,6 +965,20 @@ class MempalaceConfig:
         return hooks.get("auto_save", True)
 
     @property
+    def wing_routes(self):
+        """``(path glob, wing)`` pairs from ``wing_routes``; malformed entries are skipped."""
+        routes = self._file_config.get("wing_routes", [])
+        if not isinstance(routes, list):
+            return []
+        return [
+            (route["path"], route["wing"])
+            for route in routes
+            if isinstance(route, dict)
+            and isinstance(route.get("path"), str)
+            and isinstance(route.get("wing"), str)
+        ]
+
+    @property
     def convo_spellcheck(self):
         """Whether the conversation miner spell-corrects user turns. Off by default.
 

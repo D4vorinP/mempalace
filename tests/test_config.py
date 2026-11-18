@@ -1577,3 +1577,26 @@ def test_a_setter_after_init_keeps_what_init_recorded(tmp_path):
     cfg.set_entity_languages(["en", "pt"])
     with open(tmp_path / "config.json") as f:
         assert json.load(f) == {"palace_path": str(palace), "entity_languages": ["en", "pt"]}
+
+
+def test_wing_routes_default_to_empty(tmp_path):
+    assert MempalaceConfig(config_dir=str(tmp_path)).wing_routes == []
+
+
+def test_wing_routes_skip_malformed_entries(tmp_path):
+    routes = [
+        {"path": "D:/Novita/BlueTrader-New*", "wing": "BlueTrader"},
+        {"path": "D:/Novita/no-wing"},
+        "not a route",
+        {"path": 3, "wing": "numeric-path"},
+    ]
+    with open(tmp_path / "config.json", "w") as f:
+        json.dump({"wing_routes": routes}, f)
+    cfg = MempalaceConfig(config_dir=str(tmp_path))
+    assert cfg.wing_routes == [("D:/Novita/BlueTrader-New*", "BlueTrader")]
+
+
+def test_wing_routes_that_are_not_a_list_are_ignored(tmp_path):
+    with open(tmp_path / "config.json", "w") as f:
+        json.dump({"wing_routes": {"D:/Novita/*": "novita"}}, f)
+    assert MempalaceConfig(config_dir=str(tmp_path)).wing_routes == []
